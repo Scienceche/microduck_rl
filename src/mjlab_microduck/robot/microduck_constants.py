@@ -47,7 +47,54 @@ assert MICRODUCK_ALLCOLLISIONS_BACKLASH_XML.exists(), f"XML not found: {MICRODUC
 
 
 def get_walk_spec() -> mujoco.MjSpec:
-    return mujoco.MjSpec.from_file(str(MICRODUCK_WALK_XML))
+    return adapt_spec_to_replica(mujoco.MjSpec.from_file(str(MICRODUCK_WALK_XML)))
+
+
+# ---------------------------------------------------------------------------
+# Replica adaptation (Feetech HD1910 build).
+# ---------------------------------------------------------------------------
+# The official model is 737.2 g with its battery (~150 g) inside the head
+# shell (jaw_soft totals 188.8 g). Our replica is 919 g measured, with a
+# 190 g 2S pouch mounted at the BOTTOM REAR of the trunk — the single
+# biggest dynamic difference between the two robots (our CoM is lower and
+# further back). Re-mass the CAD model so training sees our robot:
+#   1. strip the in-head battery share from jaw_soft,
+#   2. weld our bottom-rear battery onto trunk_base (no joint, no geoms),
+#   3. scale every other body so the total hits the measured 919 g
+#      (heavier HD1910 servos are roughly uniformly distributed).
+# Inertias scale with mass (geometrically-similar scaling).
+REPLICA_TOTAL_MASS = 0.919  # kg, measured on the real robot
+REPLICA_BATTERY_MASS = 0.190  # kg, 2S pouch + BMS
+REPLICA_BATTERY_POS = (-0.027, 0.0, -0.055)  # trunk_base frame: 27 mm behind, below center
+OFFICIAL_HEAD_BATTERY_MASS = 0.150  # kg, battery share stripped from jaw_soft
+
+
+def adapt_spec_to_replica(spec: mujoco.MjSpec) -> mujoco.MjSpec:
+    jaw = spec.body("jaw_soft")
+    keep_ratio = (jaw.mass - OFFICIAL_HEAD_BATTERY_MASS) / jaw.mass
+    jaw.fullinertia = [v * keep_ratio for v in jaw.fullinertia]
+    jaw.mass = jaw.mass - OFFICIAL_HEAD_BATTERY_MASS
+
+    battery = spec.body("trunk_base").add_body(
+        name="replica_battery", pos=REPLICA_BATTERY_POS
+    )
+    battery.mass = REPLICA_BATTERY_MASS
+    # 70 x 38 x 35 mm pouch: I = m/12 * (dy^2+dz^2, dx^2+dz^2, dx^2+dy^2)
+    battery.fullinertia = [4.2e-5, 9.7e-5, 1.0e-4, 0.0, 0.0, 0.0]
+
+    rest = sum(
+        b.mass for b in spec.bodies if b.name != "replica_battery"
+    )
+    scale = (REPLICA_TOTAL_MASS - REPLICA_BATTERY_MASS) / rest
+    for b in spec.bodies:
+        if b.name in ("replica_battery", "world") or b.mass == 0:
+            continue
+        if any(v != 0.0 for v in b.fullinertia):
+            b.fullinertia = [v * scale for v in b.fullinertia]
+        else:
+            b.inertia = [v * scale for v in b.inertia]
+        b.mass = b.mass * scale
+    return spec
 
 
 def get_standup_spec() -> mujoco.MjSpec:
@@ -159,17 +206,18 @@ FULL_COLLISION = CollisionCfg(
 #   - vin_range: per-env battery voltage sampled at startup (replaces fixed vin)
 #   - vin_drop_gain_range: load-dependent voltage sag V_drop = gain * sum(|tau|)
 #   - vin_min: hard floor on the effective voltage after sag
-# kp_fw kept at 200 (microduck's preserved firmware stiffness; microban uses 125).
+# Replica: Feetech HD1910 identified params (ftservo/ftservo-bam, 7.4 V,
+# m6 full friction model). kp_fw is NOT overridden: the HD1910Actuator
+# class carries Feetech's identified firmware P gain (kp=32) — the XL330's
+# 200 below belongs to a different firmware/unit system.
+# vin_range matches our 2S LiPo (8.4 V full → 6.4 V empty).
 _BAM_ACTUATOR_KWARGS = dict(
-    motor_name="xl330",
+    motor_name="feetech_hd1910_7_4V",
     model="m6",
     target_names_expr=(r"^(?!passive_).*",),
-    kp_fw=200.0,  # microduck's preserved firmware stiffness (microban uses 125)
-    # vin_range=(6.9, 7.9),
     vin_range=(6.5, 8.2),
     vin_drop_gain_range=(0.0, 0.2),
     vin_min=6.0,
-    # max_current=1.75,
     delay_min_lag=3,
     delay_max_lag=6,
 )
