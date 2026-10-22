@@ -206,18 +206,20 @@ FULL_COLLISION = CollisionCfg(
 #   - vin_range: per-env battery voltage sampled at startup (replaces fixed vin)
 #   - vin_drop_gain_range: load-dependent voltage sag V_drop = gain * sum(|tau|)
 #   - vin_min: hard floor on the effective voltage after sag
-# Replica: Feetech HD1910 identified params (ftservo/ftservo-bam, 7.4 V,
-# m6 full friction model). kp_fw is NOT overridden: the HD1910Actuator
-# class carries Feetech's identified firmware P gain (kp=32) — the XL330's
-# 200 below belongs to a different firmware/unit system.
-# vin_range matches our 2S LiPo (8.4 V full → 6.4 V empty).
+# Replica: HD1910 identified params. Two independent identifications exist:
+#   - ftservo-bam (Feetech official, gitee): feetech_hd1910_7_4V, kp defaults 32
+#   - kissqy/Microduck-kissqy (community, proven walking on real HD1910):
+#     hd1910_kissqy + kp_fw=5.0 + STS3215-style rate-limited firmware model.
+# Round 4 (2026-10-23) uses the kissqy set — their policy demonstrably walks on
+# the real servo. vin_range matches their config (7.4–8.0, floor 7.0).
 _BAM_ACTUATOR_KWARGS = dict(
-    motor_name="feetech_hd1910_7_4V",
+    motor_name="hd1910_kissqy",
     model="m6",
     target_names_expr=(r"^(?!passive_).*",),
-    vin_range=(6.5, 8.2),
+    kp_fw=5.0,
+    vin_range=(7.4, 8.0),
     vin_drop_gain_range=(0.0, 0.2),
-    vin_min=6.0,
+    vin_min=7.0,
     delay_min_lag=3,
     delay_max_lag=6,
 )
