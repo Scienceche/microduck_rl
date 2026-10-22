@@ -343,7 +343,7 @@ def make_microduck_velocity_env_cfg(
     # std 放宽 sqrt(0.2): 误差在旧 std 的尾部(奖励~0.03,梯度近零),先让它
     # "看得见"进步(AGENTS.md: std 要宽到当前策略能得分),收敛后再收紧。
     cfg.rewards["track_linear_velocity"].weight = 3.0
-    cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.2)
+    cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.15)
     cfg.rewards["track_angular_velocity"].weight = 2.0
     cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.5)
 
@@ -648,7 +648,7 @@ def make_microduck_velocity_env_cfg(
     # lin ±0.4 / ang ±2.0 outpaced the robot's capability and tracked a
     # post-iter-1000 reward/episode-length decline. ang ±1.0 is the big
     # change — it makes turning learnable.
-    command.ranges.lin_vel_x = (-0.4, 0.4)
+    command.ranges.lin_vel_x = (-0.1, 0.4)  # 2026-10-22晚: 偏向前进采样,破解前/后双态
     command.ranges.lin_vel_y = (-0.3, 0.3)
     command.ranges.ang_vel_z = (-1.0, 1.0)
     command.viz.z_offset = 0.5
