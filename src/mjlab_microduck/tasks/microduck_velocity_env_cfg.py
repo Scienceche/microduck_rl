@@ -22,7 +22,7 @@ from copy import deepcopy
 NUM_STEPS_PER_ENV = 24
 
 # Fraction of envs commanded to spin on the spot (lin=0, |ang| ∈ [0.4·max, max]).
-TURN_IN_PLACE_FRACTION = 0.15
+TURN_IN_PLACE_FRACTION = 0.10
 
 # Symmetry
 ENABLE_SYMMETRY = False
@@ -339,8 +339,11 @@ def make_microduck_velocity_env_cfg(
     cfg.rewards["angular_momentum"].weight = -0.02
 
     # Velocity tracking rewards
-    cfg.rewards["track_linear_velocity"].weight = 2.0
-    cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.1)
+    # 2026-10-22 复刻适配实测: 策略站稳定但不平移(err~0.59)。权重 2.0->3.0,
+    # std 放宽 sqrt(0.2): 误差在旧 std 的尾部(奖励~0.03,梯度近零),先让它
+    # "看得见"进步(AGENTS.md: std 要宽到当前策略能得分),收敛后再收紧。
+    cfg.rewards["track_linear_velocity"].weight = 3.0
+    cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.2)
     cfg.rewards["track_angular_velocity"].weight = 2.0
     cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.5)
 
@@ -799,9 +802,9 @@ def make_microduck_velocity_env_cfg(
                 {"step": 0,           "rel_standing_envs": 0.02},
                 {"step": 500 * 24,    "rel_standing_envs": 0.05},
                 {"step": 750 * 24,    "rel_standing_envs": 0.1},
-                {"step": 1000 * 24,   "rel_standing_envs": 0.15},
-                {"step": 1500 * 24,   "rel_standing_envs": 0.2},
-                {"step": 2000 * 24,   "rel_standing_envs": 0.25},
+                {"step": 1000 * 24,   "rel_standing_envs": 0.10},
+                {"step": 1500 * 24,   "rel_standing_envs": 0.10},
+                {"step": 2000 * 24,   "rel_standing_envs": 0.10},
             ],
         },
     )
