@@ -252,7 +252,7 @@ NUM_STEPS_PER_ENV = 24
 # under the conditions it was trained under. Set False to train from scratch
 # with the original from-scratch schedule (phase constants below scale up).
 WARM_START = True
-WARM_START_RUN = "pollen-robotics/mjlab_microduck/441tzs6d"   # alpha_walking.onnx
+WARM_START_RUN = "local"   # 官方 wandb 不可达;教师检查点已从 HF microduck-training 下载到本地
 WARM_START_CHECKPOINT = "model_3750.pt"
 
 # Phase boundaries (PPO iterations; env step counter scales by num_steps_per_env=24).
