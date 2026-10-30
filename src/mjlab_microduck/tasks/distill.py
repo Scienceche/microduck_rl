@@ -62,8 +62,6 @@ def default_bc_cfg() -> dict:
     return {
         # Expert checkpoint: either a local ``checkpoint_path`` or a wandb run.
         "checkpoint_path": "logs/rsl_rl/expert_cache/microduck_stand/69u48n8l_9750/model_9750.pt",
-        "checkpoint_name": "model_9750.pt",
-        "checkpoint_path": None,
         "coef": 1.0,               # MSE weight (actions in rad)
         "learning_rate": 3e-4,     # dedicated Adam (PPO's adaptive-KL LR must not throttle the BC)
         "gate_tilt_deg": 35.0,     # stand expert teaches frames with tilt > this
@@ -75,8 +73,6 @@ def default_bc_cfg() -> dict:
         "twist_slice": (48, 51),   # twist command slot → zeroed for the stand expert
         # Walk anchor (run-3 lesson): the warm-start walk teaches frames with tilt < anchor_tilt_deg.
         "anchor_checkpoint_path": "logs/rsl_rl/expert_cache/velocity2/441tzs6d_3750/model_3750.pt",
-        "anchor_checkpoint_name": "model_3750.pt",
-        "anchor_checkpoint_path": None,
         "anchor_coef": 1.0,
         "anchor_tilt_deg": 25.0,
         # Body-control routing (2026-10, branch improve_velstand2). When body_slice is set,
