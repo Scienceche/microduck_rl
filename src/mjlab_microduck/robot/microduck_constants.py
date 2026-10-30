@@ -63,8 +63,8 @@ def get_walk_spec() -> mujoco.MjSpec:
 #   3. scale every other body so the total hits the measured 919 g
 #      (heavier HD1910 servos are roughly uniformly distributed).
 # Inertias scale with mass (geometrically-similar scaling).
-REPLICA_TOTAL_MASS = 0.919  # kg, measured on the real robot
-REPLICA_BATTERY_MASS = 0.190  # kg, 2S pouch + BMS
+REPLICA_TOTAL_MASS = 0.936  # kg, measured 2026-10-30 (919g + 电池底座 12g + 组装增量)
+REPLICA_BATTERY_MASS = 0.202  # kg, 2S pouch 190g + BMS + 电池底座 12g (合体安装)
 REPLICA_BATTERY_POS = (-0.027, 0.0, -0.055)  # trunk_base frame: 27 mm behind, below center
 OFFICIAL_HEAD_BATTERY_MASS = 0.150  # kg, battery share stripped from jaw_soft
 
