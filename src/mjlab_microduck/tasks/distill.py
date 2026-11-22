@@ -60,9 +60,17 @@ EXPERT_CACHE_DIR = Path("logs/rsl_rl/expert_cache")
 
 def default_bc_cfg() -> dict:
     return {
-        # Expert checkpoint: either a local ``checkpoint_path`` or a wandb run.
+        # Expert checkpoint, first that resolves: a local ``checkpoint_path``, a Hub training
+        # bundle ``hf_checkpoint`` (hf://..., checkpoints.py — no wandb access needed), a wandb run.
+        # (merge 2026-11-22: took upstream's 3-level fallback chain, kept the P2 line's
+        # local-path-first resolution and coef=0.0 behavior — dual expert has internal
+        # anchoring, no external BC needed.)
+        "wandb_run_path": "pollen-robotics/mjlab_microduck/69u48n8l",
+        "checkpoint_name": "model_9750.pt",
         "checkpoint_path": "logs/rsl_rl/expert_cache/microduck_stand/69u48n8l_9750/model_9750.pt",
-        "coef": 0.0,  # P2: dual expert has internal anchoring, no external BC needed               # MSE weight (actions in rad)
+        "hf_checkpoint": "hf://pollen-robotics/microduck-training/bundles/microduck_stand/69u48n8l_9750",
+        "coef": 0.0,               # MSE weight (actions in rad); P2: 0.0 — dual expert anchors internally
+
         "learning_rate": 3e-4,     # dedicated Adam (PPO's adaptive-KL LR must not throttle the BC)
         "gate_tilt_deg": 35.0,     # stand expert teaches frames with tilt > this
         "epochs": 5,               # × mini_batches = up to 20 BC steps/iter
@@ -72,8 +80,12 @@ def default_bc_cfg() -> dict:
         "gravity_slice": (3, 6),   # projected gravity in the actor obs
         "twist_slice": (48, 51),   # twist command slot → zeroed for the stand expert
         # Walk anchor (run-3 lesson): the warm-start walk teaches frames with tilt < anchor_tilt_deg.
+        "anchor_wandb_run_path": "pollen-robotics/mjlab_microduck/441tzs6d",
+        "anchor_checkpoint_name": "model_3750.pt",
         "anchor_checkpoint_path": "logs/rsl_rl/velocity/2026-11-10_13-20-40_velocity/model_3999.pt",
-        "anchor_coef": 0.0,  # P2: walk expert frozen, no anchor needed
+        "anchor_hf_checkpoint": "hf://pollen-robotics/microduck-training/bundles/velocity2/441tzs6d_3750",
+        "anchor_coef": 0.0,  # P2: walk expert frozen, no anchor needed (merge kept P2 behavior)
+
         "anchor_tilt_deg": 25.0,
         # Body-control routing (2026-10, branch improve_velstand2). When body_slice is set,
         # STANDING frames (twist obs exactly 0) with a non-zero body command on
@@ -222,10 +234,22 @@ def load_expert_from(actor: torch.nn.Module, state_dict: dict) -> torch.nn.Modul
 
 
 def _resolve_checkpoint(bc_cfg: dict, prefix: str = "") -> Path | None:
-    """Local ``<prefix>checkpoint_path`` if given, else download ``<prefix>wandb_run_path``."""
+    """Local ``<prefix>checkpoint_path``, else the ``<prefix>hf_checkpoint`` bundle, else ``<prefix>wandb_run_path``.
+
+    A failing Hub bundle (private repo, no token, offline) falls through to wandb when one is set.
+    """
     if bc_cfg.get(f"{prefix}checkpoint_path"):
         return Path(bc_cfg[f"{prefix}checkpoint_path"])
     run = bc_cfg.get(f"{prefix}wandb_run_path")
+    if bc_cfg.get(f"{prefix}hf_checkpoint"):
+        from mjlab_microduck.checkpoints import resolve
+
+        try:
+            return resolve(bc_cfg[f"{prefix}hf_checkpoint"])
+        except Exception as e:
+            if not run:
+                raise
+            print(f"[distill] {prefix}hf_checkpoint unavailable ({e!r}); falling back to wandb {run}")
     if not run:
         return None
     from mjlab.utils.os import get_wandb_checkpoint_path
