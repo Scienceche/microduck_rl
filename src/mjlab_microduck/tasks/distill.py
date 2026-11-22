@@ -62,7 +62,7 @@ def default_bc_cfg() -> dict:
     return {
         # Expert checkpoint: either a local ``checkpoint_path`` or a wandb run.
         "checkpoint_path": "logs/rsl_rl/expert_cache/microduck_stand/69u48n8l_9750/model_9750.pt",
-        "coef": 1.0,               # MSE weight (actions in rad)
+        "coef": 0.0,  # P2: dual expert has internal anchoring, no external BC needed               # MSE weight (actions in rad)
         "learning_rate": 3e-4,     # dedicated Adam (PPO's adaptive-KL LR must not throttle the BC)
         "gate_tilt_deg": 35.0,     # stand expert teaches frames with tilt > this
         "epochs": 5,               # × mini_batches = up to 20 BC steps/iter
@@ -72,8 +72,8 @@ def default_bc_cfg() -> dict:
         "gravity_slice": (3, 6),   # projected gravity in the actor obs
         "twist_slice": (48, 51),   # twist command slot → zeroed for the stand expert
         # Walk anchor (run-3 lesson): the warm-start walk teaches frames with tilt < anchor_tilt_deg.
-        "anchor_checkpoint_path": "logs/rsl_rl/expert_cache/velocity2/441tzs6d_3750/model_3750.pt",
-        "anchor_coef": 1.0,
+        "anchor_checkpoint_path": "logs/rsl_rl/velocity/2026-11-10_13-20-40_velocity/model_3999.pt",
+        "anchor_coef": 0.0,  # P2: walk expert frozen, no anchor needed
         "anchor_tilt_deg": 25.0,
         # Body-control routing (2026-10, branch improve_velstand2). When body_slice is set,
         # STANDING frames (twist obs exactly 0) with a non-zero body command on
@@ -241,7 +241,7 @@ class PpoWithExpertBc(PPO):
         self.bc_cfg = bc_cfg
         self.expert = None
         self.anchor = None
-        if bc_cfg:
+        if bc_cfg and bc_cfg.get("coef", 0.0) > 0:
             ckpt = torch.load(_resolve_checkpoint(bc_cfg), map_location=self.device, weights_only=False)
             self.expert = load_expert_from(self.actor, ckpt["actor_state_dict"]).to(self.device)
             anchor_path = _resolve_checkpoint(bc_cfg, "anchor_") if bc_cfg.get("anchor_coef", 0.0) > 0 else None

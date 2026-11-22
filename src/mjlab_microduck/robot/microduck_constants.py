@@ -65,7 +65,25 @@ def get_walk_spec() -> mujoco.MjSpec:
 # Inertias scale with mass (geometrically-similar scaling).
 REPLICA_TOTAL_MASS = 0.936  # kg, measured 2026-10-30 (919g + 电池底座 12g + 组装增量)
 REPLICA_BATTERY_MASS = 0.202  # kg, 2S pouch 190g + BMS + 电池底座 12g (合体安装)
-REPLICA_BATTERY_POS = (-0.027, 0.0, -0.055)  # trunk_base frame: 27 mm behind, below center
+REPLICA_BATTERY_POS = (-0.024, 0.0, -0.004)  # trunk_base frame: rear cavity, vertical pack
+#   - settlement scan correction (2026-11-08): back face at the shell rear line
+#     (-0.047, i.e. center -0.024) is the model-consistent limit — pushing to the
+#     T12-spacer position (-0.059) intersects the hip housings during settling
+#     (sim has no plate mesh; the real 12 mm protrusion lives where the plate is).
+#     Verified: standing 0.1155 m, pitch 0.0 deg, zero battery contacts.
+# 2026-11-08 derivation from the actual 3D model + official mount recipe:
+#   - ray-cast survey of the trunk shells (world, HOME): shells span x -0.047..0.035,
+#     z 0.076..0.162; the bay is an OPEN shell (no plate mesh, open floor/rear).
+#   - official mount (硬件资料/电池托架/official): pack stands VERTICAL —
+#     NP-F970 38.6w x 20.6t x 70.8h against the 83.5-tall power_support back plate;
+#     our 38 mm thickness vs 28.3 mm official depth -> T12 spacers push the plate
+#     12 mm back, so the pack back face sits ~12 mm behind the shell rear line.
+#   - derived: back face x = -0.047 (shell rear) - 0.012 (T12) = -0.059,
+#     center x = -0.059 + 0.019 = -0.040; floor z = 0.076 (shell bottom line),
+#     center z = 0.076 + 0.035 = 0.111 (world) = -0.009 local; y centered.
+#   - orientation VERTICAL (70 along z, 38 along x, 35 along y); inertia recomputed
+#     for that box below. The earlier horizontal read came from mistaking the
+#     control box for the battery in the CAD screenshot.
 OFFICIAL_HEAD_BATTERY_MASS = 0.150  # kg, battery share stripped from jaw_soft
 
 
@@ -79,8 +97,21 @@ def adapt_spec_to_replica(spec: mujoco.MjSpec) -> mujoco.MjSpec:
         name="replica_battery", pos=REPLICA_BATTERY_POS
     )
     battery.mass = REPLICA_BATTERY_MASS
-    # 70 x 38 x 35 mm pouch: I = m/12 * (dy^2+dz^2, dx^2+dz^2, dx^2+dy^2)
-    battery.fullinertia = [4.2e-5, 9.7e-5, 1.0e-4, 0.0, 0.0, 0.0]
+    # VERTICAL pack 38(X) x 35(Y) x 70(Z): I = m/12*(y^2+z^2, x^2+z^2, x^2+y^2)
+    battery.fullinertia = [2.58e-5, 2.66e-5, 1.12e-5, 0.0, 0.0, 0.0]
+
+    # 2026-11-06: real collision box. The battery was welded in as mass-only
+    # (no geoms), so no policy ever felt it — on the robot the feet drive into
+    # it during combined hip/knee/ankle motions and jam. Default
+    # contype/conaffinity (1/1) collides with class="collision" leg/foot geoms;
+    # being jointless under trunk_base keeps torso self-contacts excluded.
+    # mass=0 preserves the explicit body mass/inertia above.
+    battery_geom = battery.add_geom(name="replica_battery_collision")
+    battery_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    battery_geom.size = [0.019, 0.0175, 0.035]  # half-extents: 38x35x70 mm (vertical)
+    battery_geom.mass = 0.0
+    battery_geom.rgba = [0.9, 0.45, 0.1, 0.35]
+    battery_geom.group = 3
 
     rest = sum(
         b.mass for b in spec.bodies if b.name != "replica_battery"
@@ -162,21 +193,24 @@ def get_rollers_backlash_spec() -> mujoco.MjSpec:
 
 HOME_FRAME = EntityCfg.InitialStateCfg(
     joint_pos={
-        # Lower body — STAND2 pose: trunk shifted ~5mm forward over the feet so
-        # the CoM sits over the ankle axis (was ~5mm behind it at the old HOME,
-        # which biased the robot backward and made the standup policy droop its
-        # head forward as a counterweight). Leg pitch chain leaned forward:
-        # hip_pitch 30°→26.24°, ankle 30°→25.95°, knee 0°→0.28°. Matches the
-        # STAND keyframe in scene.xml / scene_walk.xml.
+        # Lower body — STAND3 pose (2026-11-06, replica lean). STAND2 already
+        # leaned the official robot forward once (hip 30°→26.24°, CoM ~5mm
+        # ahead of the ankle) for its in-head battery. Our replica carries the
+        # 202 g pack at the rear-bottom (-0.027, 0, -0.055): at STAND2 the CoM
+        # falls behind the support polygon and the passive HOME hold topples
+        # backward — confirmed in sim (rigid-joint tipping test) AND on the
+        # robot (temp zero-shift test 2026-11-06: STAND2 falls back, this pose
+        # stands unaided). Sim sweep boundary was ~21°; this is 19.2° with
+        # margin. hip_pitch 26.24°→19.18°, ankle 25.95°→19.00°, knee 0.28°.
         r".*hip_yaw.*": 0.0,
         r".*left_hip_roll.*": -0.0873,
         r".*right_hip_roll.*": 0.0873,
-        r".*left_hip_pitch.*": -0.4579,
-        r".*right_hip_pitch.*": 0.4579,
+        r".*left_hip_pitch.*": -0.3350,
+        r".*right_hip_pitch.*": 0.3350,
         r".*left_knee.*": -0.0049,
         r".*right_knee.*": 0.0049,
-        r".*left_ankle.*": 0.4530,
-        r".*right_ankle.*": -0.4530,
+        r".*left_ankle.*": 0.3315,
+        r".*right_ankle.*": -0.3315,
         # Head
         r".*neck_pitch.*": 0.3491,
         r".*head_pitch.*": 0.3491,

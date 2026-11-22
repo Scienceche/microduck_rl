@@ -734,6 +734,10 @@ def make_microduck_standup_env_cfg(
             # Standing init: trunk just above the measured equilibrium (STAND_Z=0.115).
             "standing_z_min":            0.11,
             "standing_z_max":            0.12,
+            # run12 (2026-11-13): 桥式/头撑初始态(真机黑匣子卡住姿态校准,
+            # run11 起身 OOD 饱和的根治) + 站立桶后向初速(减速接手态, 治停住后仰)
+            "bridge_prob":               0.18,
+            "standing_back_vel_prob":    0.5,
         },
     )
 

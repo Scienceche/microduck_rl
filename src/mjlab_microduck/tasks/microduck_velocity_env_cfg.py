@@ -266,6 +266,11 @@ def make_microduck_velocity_env_cfg(
     cfg.scene.entities = {"robot": MICRODUCK_WALK_ROBOT_CFG}
     cfg.scene.sensors = (feet_ground_cfg, self_collision_cfg, foot_height_scan_cfg)
     cfg.viewer.body_name = "trunk_base"
+    # Close chase cam: the robot is 12 cm tall — the 5 m / -45° default reads
+    # as a top-down map where the duck is a speck on a flat plain.
+    cfg.viewer.distance = 0.7
+    cfg.viewer.elevation = -18.0
+    cfg.viewer.azimuth = 130.0
 
     # Action configuration
     joint_pos_action = cfg.actions["joint_pos"]
@@ -784,11 +789,11 @@ def make_microduck_velocity_env_cfg(
             "reward_name": "action_rate_l2",
             "weight_stages": [
                 {"step": 0, "weight": -0.1},
-                {"step": 500 * NUM_STEPS_PER_ENV, "weight": -0.2},
-                {"step": 750 * NUM_STEPS_PER_ENV, "weight": -0.4},
-                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": -0.6},
-                {"step": 1250 * NUM_STEPS_PER_ENV, "weight": -0.8},
-                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": -1.0},
+                {"step": 500 * NUM_STEPS_PER_ENV, "weight": -0.1},  # run5 减半
+                {"step": 750 * NUM_STEPS_PER_ENV, "weight": -0.2},
+                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": -0.3},
+                {"step": 1250 * NUM_STEPS_PER_ENV, "weight": -0.4},
+                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": -0.5},  # run5: -1.0->-0.5 站立微调松绑
             ],
         },
     )
@@ -803,8 +808,8 @@ def make_microduck_velocity_env_cfg(
                 {"step": 500 * 24,    "rel_standing_envs": 0.05},
                 {"step": 750 * 24,    "rel_standing_envs": 0.1},
                 {"step": 1000 * 24,   "rel_standing_envs": 0.10},
-                {"step": 1500 * 24,   "rel_standing_envs": 0.10},
-                {"step": 2000 * 24,   "rel_standing_envs": 0.10},
+                {"step": 1500 * 24,   "rel_standing_envs": 0.50},  # run5: 0.30->0.50 站立门槛攻坚
+                {"step": 2000 * 24,   "rel_standing_envs": 0.50},  # run5
             ],
         },
     )

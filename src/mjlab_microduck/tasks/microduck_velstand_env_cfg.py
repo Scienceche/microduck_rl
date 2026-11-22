@@ -302,7 +302,7 @@ RECOVERY_ECON_KICKIN_ITER = 600 if WARM_START else 1200
 # distill the deployed stand expert into the fallen frames (see distill.py).
 # The expert recovers 100% face-down/up and 95% side on this model in ~1 s.
 ENABLE_EXPERT_BC = True
-EXPERT_BC_COEF = 1.0
+EXPERT_BC_COEF = 0.0  # P2: dual expert internal anchoring
 EXPERT_BC_GATE_TILT_DEG = 35.0
 
 # Body control (2026-10, branch improve_velstand2). The deployed velstand ignores
@@ -510,7 +510,7 @@ PRONE_RAMP_STAGES = [
     {"step": _PRONE_ITERS[0] * NUM_STEPS_PER_ENV, "params": {"prone_prob": 0.00, "face_down_prob": 1.0,  "side_prob": PRONE_SIDE_PROB, "crouch_prob": 0.20}},
     {"step": _PRONE_ITERS[1] * NUM_STEPS_PER_ENV, "params": {"prone_prob": 0.15, "face_down_prob": 0.80, "side_prob": PRONE_SIDE_PROB, "crouch_prob": 0.20}},
     {"step": _PRONE_ITERS[2] * NUM_STEPS_PER_ENV, "params": {"prone_prob": 0.30, "face_down_prob": 0.65, "side_prob": PRONE_SIDE_PROB, "crouch_prob": 0.20}},
-    {"step": _PRONE_ITERS[3] * NUM_STEPS_PER_ENV, "params": {"prone_prob": 0.45, "face_down_prob": 0.50, "side_prob": PRONE_SIDE_PROB, "crouch_prob": 0.20}},
+    {"step": _PRONE_ITERS[3] * NUM_STEPS_PER_ENV, "params": {"prone_prob": 0.30, "face_down_prob": 0.50, "side_prob": PRONE_SIDE_PROB, "crouch_prob": 0.20}},  # 2026-11-08: 0.45->0.30 rebalance toward standing gate
 ]
 
 
@@ -960,6 +960,7 @@ def make_microduck_velstand_env_cfg(play: bool = False, rough: bool = False) -> 
 
 MicroduckVelStandRlCfg = RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
+        class_name="mjlab_microduck.tasks.dual_expert_mlp.DualExpertMLPModel",
         hidden_dims=(512, 256, 128),
         activation="elu",
         obs_normalization=True,

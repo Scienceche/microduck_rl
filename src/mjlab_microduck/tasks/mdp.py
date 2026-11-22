@@ -129,6 +129,13 @@ try:
     _orig_runner_load = _MjlabRunner.load
 
     def _load_with_warm_start(self, path, *args, **kwargs):
+        warm = os.environ.get(WARM_START_ENV, "") not in ("", "0")
+        if warm:
+            # P2: skip optimizer (dual expert has different param count than source)
+            kwargs.setdefault("load_cfg", {
+                "actor": True, "critic": True, "optimizer": False,
+                "iteration": False, "rnd": False,
+            })
         infos = _orig_runner_load(self, path, *args, **kwargs)
         if os.environ.get(WARM_START_ENV, "") not in ("", "0"):
             restored = self.env.unwrapped.common_step_counter
@@ -4318,6 +4325,8 @@ def set_random_ground_state(
     face_up_prob: float = 0.4,
     sitting_prob: float = 0.2,
     standing_prob: float = 0.0,
+    bridge_prob: float = 0.0,
+    standing_back_vel_prob: float = 0.0,
     prone_z_min: float = 0.20,
     prone_z_max: float = 0.25,
     sitting_z_min: float = 0.07,
@@ -4355,10 +4364,12 @@ def set_random_ground_state(
     env_ids = env_ids.to(env.device, dtype=torch.int)
     num = len(env_ids)
 
-    total = face_down_prob + face_up_prob + sitting_prob + standing_prob
+    total = (face_down_prob + face_up_prob + sitting_prob
+             + standing_prob + bridge_prob)
     p_fd  = face_down_prob / total
     p_fu  = (face_down_prob + face_up_prob) / total
     p_sit = (face_down_prob + face_up_prob + sitting_prob) / total
+    p_stand = (face_down_prob + face_up_prob + sitting_prob + standing_prob) / total
 
     yaw = torch.rand(num, device=env.device) * 2 * np.pi - np.pi
     cy = torch.cos(yaw * 0.5)
@@ -4384,10 +4395,11 @@ def set_random_ground_state(
         sitting = torch.stack([cy, torch.zeros_like(cy), torch.zeros_like(cy), sy], dim=1)
 
     u = torch.rand(num, device=env.device)
-    is_fd    = u < p_fd
-    is_fu    = (u >= p_fd) & (u < p_fu)
-    is_sit   = (u >= p_fu) & (u < p_sit)
-    is_stand = u >= p_sit
+    is_fd     = u < p_fd
+    is_fu     = (u >= p_fd) & (u < p_fu)
+    is_sit    = (u >= p_fu) & (u < p_sit)
+    is_stand  = (u >= p_sit) & (u < p_stand)
+    is_bridge = u >= p_stand  # run12: 桥式/头撑(真机 OOD, 黑匣子 2026-11-13 校准)
 
     # Face-up partial-roll noise: rotate the supine pose about the body's long
     # axis by uniform ±face_up_roll_max. WHY (2026-07, back-recovery was
@@ -4428,6 +4440,21 @@ def set_random_ground_state(
     new_quat[is_fu]    = face_up[is_fu]
     new_quat[is_sit]   = sitting[is_sit]
     new_quat[is_stand] = sitting[is_stand]
+    # 桥式躯干: 80% 头朝下斜撑 55-95° / 20% 背撑 55-85°, ±25° 侧倾, 随机 yaw
+    if bridge_prob > 0.0 and is_bridge.any():
+        sign = torch.where(torch.rand(num, device=env.device) < 0.8, 1.0, -1.0)
+        pitch_b = sign * (torch.rand(num, device=env.device)
+                          * (math.radians(95) - math.radians(55)) + math.radians(55))
+        roll_b = (torch.rand(num, device=env.device) * 2 - 1) * math.radians(25)
+        cp = torch.cos(pitch_b * 0.5); sp = torch.sin(pitch_b * 0.5)
+        cr = torch.cos(roll_b * 0.5);  sr = torch.sin(roll_b * 0.5)
+        bridge_q = torch.stack([
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - cr * sp * cy,
+        ], dim=1)
+        new_quat[is_bridge] = bridge_q[is_bridge]
 
     # Random z per env: prone heights for face-down/up, low for sit, ~standing for stand.
     z_prone = torch.rand(num, device=env.device) * (prone_z_max - prone_z_min) + prone_z_min
@@ -4436,6 +4463,11 @@ def set_random_ground_state(
     new_z = z_prone.clone()
     new_z = torch.where(is_sit, z_sit, new_z)
     new_z = torch.where(is_stand, z_stand, new_z)
+    # 桥式: 头+脚撑地对角几何需更高出生位自沉降(实测 0.05-0.09 带出生自穿插,
+    # 接触求解器可弹到 0.22m+)
+    if bridge_prob > 0.0 and is_bridge.any():
+        z_br = torch.rand(num, device=env.device) * (0.13 - 0.08) + 0.08
+        new_z = torch.where(is_bridge, z_br, new_z)
 
     env.sim.data.qpos[env_ids, 2]   = new_z + _env_origin_z(env, env_ids)
     env.sim.data.qpos[env_ids, 3:7] = new_quat
@@ -4469,6 +4501,56 @@ def set_random_ground_state(
             noise = torch.randn(n_sit, len(cols), device=env.device) * sitting_joint_noise_std
             env.sim.data.qpos[sit_env_ids.unsqueeze(1).long(), cols.unsqueeze(0)] += noise
 
+    # ---- run12: 桥式桶关节姿态(黑匣子 13:21 stuck 实测: 一腿深折 hip/knee≈2.7rad
+    # ankle≈1.8rad, 头下压 ~1.1rad, 躯干斜撑; 仿真符号按 SIT 折叠方向) ----
+    if bridge_prob > 0.0 and is_bridge.any():
+        br_env_ids = env_ids[is_bridge]
+        n_br = len(br_env_ids)
+        dev = env.device
+        fold_left = torch.rand(n_br, device=dev) < 0.5
+        # 折叠深度限在策略可达带(home+action_scale*clip ≈ ±2.1rad): 真机 2.7rad
+        # 停滞是舵机顺应性被动停驻, 策略目标本就够不到; 更深折叠在 sim 里只会
+        # 产生 PD 回弹弹射(30% env 被崩飞), 恢复能力从同族 1.5-2.2 单调外推
+        hip = torch.rand(n_br, device=dev) * 1.0 + 2.0        # 2.0-3.0 (方案C: 覆盖实测±157±30°)
+        knee = torch.rand(n_br, device=dev) * 1.0 + 2.0       # 2.0-3.0
+        ankle = torch.rand(n_br, device=dev) * 1.0 + 1.2      # 1.2-2.2
+        ankle_sign = torch.where(torch.rand(n_br, device=dev) < 0.5, 1.0, -1.0)
+        hip2 = torch.rand(n_br, device=dev) * 1.0 + 0.2       # 另一腿半折
+        knee2 = torch.rand(n_br, device=dev) * 1.3 + 0.2
+        head_p = torch.rand(n_br, device=dev) * 0.7 + 0.5     # 头下压 0.5-1.2
+        neck_p = (torch.rand(n_br, device=dev) * 2 - 1) * 0.3
+        head_y = (torch.rand(n_br, device=dev) * 2 - 1) * 0.4
+
+        def _br_set(eids, j, vals):
+            env.sim.data.qpos[eids, 7 + servo_ids[j]] = vals
+
+        lf = br_env_ids[fold_left]
+        rf = br_env_ids[~fold_left]
+        if len(lf) > 0:
+            k = torch.arange(len(lf), device=dev)
+            _br_set(lf, 2, -hip[k]); _br_set(lf, 3, knee[k])
+            _br_set(lf, 4, ankle_sign[k] * ankle[k])
+            _br_set(lf, 11, hip2[k]); _br_set(lf, 12, -knee2[k]); _br_set(lf, 13, 0.0)
+        if len(rf) > 0:
+            k = torch.arange(len(rf), device=dev)
+            _br_set(rf, 11, hip[k]); _br_set(rf, 12, -knee[k])
+            _br_set(rf, 13, -ankle_sign[k] * ankle[k])
+            _br_set(rf, 2, -hip2[k]); _br_set(rf, 3, knee2[k]); _br_set(rf, 4, 0.0)
+        _br_set(br_env_ids, 5, neck_p)
+        _br_set(br_env_ids, 6, head_p)
+        _br_set(br_env_ids, 7, head_y)
+
+    # ---- run12: 站立桶后向初速(减速接手态, 治"停住后仰") ----
+    if standing_back_vel_prob > 0.0 and is_stand.any():
+        st_env_ids = env_ids[is_stand]
+        m = torch.rand(len(st_env_ids), device=env.device) < standing_back_vel_prob
+        back_ids = st_env_ids[m]
+        if len(back_ids) > 0:
+            yaw_st = yaw[is_stand][m]
+            v = torch.rand(len(back_ids), device=env.device) * 0.20 + 0.15  # 0.15-0.35
+            env.sim.data.qvel[back_ids, 0] = -v * torch.cos(yaw_st)
+            env.sim.data.qvel[back_ids, 1] = -v * torch.sin(yaw_st)
+
 
 # Deep-crouch anchor pose (velstand run-5): the "stuck" mid-recovery basin —
 # knees folded under the body, trunk pitched forward, feet flat. Values chosen
@@ -4482,6 +4564,12 @@ _CROUCH_ANCHOR_BY_NAME = {
     "right_hip_pitch": 1.15,
     "right_knee": -1.25,
     "right_ankle": -1.05,
+    # 2026-11-16 修复下蹲头后仰+右歪: 颈/头四关节钉在 HOME,
+    # 不让策略用头平衡(策略曾学会蹲下时头后仰, 用户实测发现)
+    "neck_pitch": 0.3491,
+    "head_pitch": 0.3491,
+    "head_yaw": 0.0,
+    "head_roll": 0.0,
 }
 
 
